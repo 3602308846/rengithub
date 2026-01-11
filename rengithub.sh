@@ -101,210 +101,178 @@ confirm() {
 
 # ================= 核心功能 =================
 quick_upload() {
+    if ! command -v git &>/dev/null; then
+        echo "❌ 未找到 Git"
+        return 1
+    fi
 
-if ! command -v git &> /dev/null; then
-    echo "❌ 未找到 Git，请先安装 Git"
-    exit 1
-fi
-
-# 获取仓库路径
-read -p "请输入本地仓库路径（直接回车使用当前目录）: " repo_path
-repo_path=${repo_path:-$(pwd)}
-
-# 检查路径
-if [ ! -d "$repo_path" ]; then
-    echo "❌ 路径不存在: $repo_path"
-    exit 1
-fi
-
-cd "$repo_path" || exit 1
-
-# 检查是否是 Git 仓库
-if [ ! -d ".git" ]; then
-    echo "❌ 当前目录不是 Git 仓库"
-    exit 1
-fi
-
-# 显示信息
-echo ""
-echo "📁 当前目录: $(pwd)"
-echo "🌿 当前分支: $(git branch --show-current 2>/dev/null || echo '无')"
-echo "📊 提交数量: $(git rev-list --count HEAD 2>/dev/null || echo '0')"
-echo "📦 文件数量: $(git ls-files 2>/dev/null | wc -l)"
-echo ""
-
-# 确认
-
-
-read -p "是否继续y/n " confirm
-
-if [ "$confirm" != "y" ]; then
-    echo "操作已取消"
-    exit 0
-fi
-
-# 执行增量上传
-echo ""
-echo "🔄 开始上传..."
-
-# 1. 清空缓存并重新添加
-echo "1. 清空暂存区并重新添加文件..."
-git rm -r --cached . 2>/dev/null
-git add -A
-
-# 2. 提交
-echo "2. 提交当前状态..."
-git commit -m "上传于 $(date '+%Y-%m-%d %H:%M:%S')"
-
-# 3. 推送
-remote_url=$(git remote get-url origin 2>/dev/null || echo "")
-if [ -n "$remote_url" ]; then
-    echo "3. 推送到远程仓库..."
-    read -p "是否推送到远程？(y/N): " push_confirm
-    if [[ $push_confirm =~ ^[Yy]$ ]]; then
-        timeout 30 git push origin HEAD --progress
-        push_exit_code=$?
-
-        if [ $push_exit_code -eq 0 ]; then
-            echo "✅ 已推送到远程仓库"
-        elif [ $push_exit_code -eq 124 ]; then
-            echo "⚠️  推送超时，请手动检查网络连接或认证"
-            echo "   可以使用命令手动推送: git push"
-        else
-            echo "⚠️  推送失败，退出码: $push_exit_code"
-            echo "   请检查远程仓库权限或网络连接"
+    read -p "请输入本地仓库路径: " repo_path
+    repo_path=${repo_path:-$(pwd)}
+    
+    [[ ! -d "$repo_path" ]] && echo "❌ 路径不存在" && return 1
+    
+    cd "$repo_path" || return 1
+    
+    [[ ! -d ".git" ]] && echo "❌ 不是 Git 仓库" && return 1
+    
+    # 修复1：先添加安全目录
+    git config --global --add safe.directory "$(pwd)"
+    
+    echo ""
+    echo "📁 目录: $(pwd)"
+    echo "🌿 分支: $(git branch --show-current 2>/dev/null)"
+    
+    # 修复2：确认
+    read -p "继续？(y/N): " confirm
+    [[ "$confirm" != "y" && "$confirm" != "Y" ]] && echo "取消" && return 0
+    
+    echo "🔄 开始上传..."
+    
+    # 修复3：检查是否有更改
+    if [[ -z $(git status --porcelain) ]]; then
+        echo "📭 没有需要提交的更改"
+    else
+        git add -A
+        git commit -m "更新于 $(date '+%Y-%m-%d %H:%M:%S')"
+    fi
+    
+    # 修复4：获取当前分支
+    current_branch=$(git branch --show-current)
+    
+    # 修复5：推送
+    if git remote get-url origin &>/dev/null; then
+        read -p "推送到远程？(y/N): " push_confirm
+        if [[ "$push_confirm" =~ ^[Yy]$ ]]; then
+            echo "🚀 推送中..."
+            if git push --force origin "$current_branch"; then
+                echo "✅ 推送成功"
+            else
+                echo "⚠️  推送失败，尝试：git push --force origin $current_branch"
+            fi
         fi
     else
-        echo "⏸️  跳过远程推送，仅更新本地仓库"
+        echo "ℹ️  未设置远程仓库"
     fi
-fi
-
-# 完成
-echo ""
-echo "✅ 增量上传完成！"
-echo ""
-echo "📊 最终状态："
-echo "   分支: $(git branch --show-current)"
-echo "   提交: $(git log --oneline -1)"
-echo "   文件: $(git ls-files | wc -l) 个"
-echo "========================================"
+    
+    echo "✅ 完成！"
 }
-
 # 2. 清空并上传（按路径）
 # 2. 清空并上传（完全修复版）
 clean_and_upload() {
-   
-if ! command -v git &> /dev/null; then
-    echo "❌ 未找到 Git，请先安装 Git"
-    exit 1
-fi
+    if ! command -v git &>/dev/null; then
+        echo "❌ 未找到 Git"
+        return 1
+    fi
 
-# 获取仓库路径
-read -p "请输入本地仓库路径（直接回车使用当前目录）: " repo_path
-repo_path=${repo_path:-$(pwd)}
-
-# 检查路径
-if [ ! -d "$repo_path" ]; then
-    echo "❌ 路径不存在: $repo_path"
-    exit 1
-fi
-
-# 进入目录
-cd "$repo_path" || exit 1
-
-# 检查是否是 Git 仓库
-if [ ! -d ".git" ]; then
-    echo "❌ 当前目录不是 Git 仓库"
-    exit 1
-fi
-
-# 显示信息
-echo ""
-echo "📁 当前目录: $(pwd)"
-echo "🌿 当前分支: $(git branch --show-current 2>/dev/null || echo '无')"
-echo "📊 提交数量: $(git rev-list --count HEAD 2>/dev/null || echo '0')"
-echo "📦 文件数量: $(git ls-files 2>/dev/null | wc -l)"
-echo ""
-
-# 确认
-echo "⚠️  ⚠️  ⚠️  严重警告 ⚠️  ⚠️  ⚠️"
-echo "此操作将："
-echo "1. 删除所有历史提交（本地和远程）"
-echo "2. 只保留当前工作区的文件"
-echo "3. 强制覆盖远程仓库"
-echo ""
-read -p "是否继续？(输入 'YES' 确认): " confirm
-
-if [ "$confirm" != "YES" ]; then
-    echo "操作已取消"
-    exit 0
-fi
-
-# 执行重置
-echo ""
-echo "🔄 开始重置仓库..."
-
-# 1. 创建孤儿分支
-echo "1. 创建全新分支起点..."
-git checkout --orphan fresh-start
-
-# 2. 添加文件
-echo "2. 添加当前所有文件..."
-git add -A
-
-# 3. 提交
-echo "3. 提交当前状态..."
-git commit -m "仓库重置于 $(date '+%Y-%m-%d %H:%M:%S')"
-
-# 4. 删除原分支
-echo "4. 删除原主分支..."
-git branch -D main 2>/dev/null || git branch -D master 2>/dev/null || true
-
-# 5. 重命名
-echo "5. 重命名分支..."
-git branch -M main
-
-# 6. 推送
-remote_url=$(git remote get-url origin 2>/dev/null || echo "")
-
-
-if [ -n "$remote_url" ]; then
-    echo "6. 推送到远程仓库..."
-    read -p "是否强制推送到远程？(y/N): " push_confirm
-    if [[ $push_confirm =~ ^[Yy]$ ]]; then
-        # 添加 --progress 和超时设置
-        timeout 30 git push -f origin main --progress
-        push_exit_code=$?
+    read -p "请输入本地仓库路径: " repo_path
+    repo_path=${repo_path:-$(pwd)}
+    
+    [[ ! -d "$repo_path" ]] && echo "❌ 路径不存在" && return 1
+    
+    cd "$repo_path" || return 1
+    
+    [[ ! -d ".git" ]] && echo "❌ 不是 Git 仓库" && return 1
+    
+    # 关键修复1：添加安全目录
+    git config --global --add safe.directory "$(pwd)"
+    
+    # 显示信息
+    echo ""
+    echo "📁 当前目录: $(pwd)"
+    current_branch=$(git branch --show-current 2>/dev/null || echo "无")
+    echo "🌿 当前分支: $current_branch"
+    
+    # 严重警告
+    echo ""
+    echo "⚠️  ⚠️  ⚠️  严重警告 ⚠️  ⚠️  ⚠️"
+    echo "此操作将："
+    echo "1. 删除所有历史提交（本地和远程）"
+    echo "2. 只保留当前工作区的文件"
+    echo "3. 强制覆盖远程仓库"
+    echo ""
+    read -p "是否继续？(输入 'YES' 确认): " confirm
+    
+    [[ "$confirm" != "YES" ]] && echo "操作已取消" && return 0
+    
+    echo ""
+    echo "🔄 开始重置仓库..."
+    
+    # 1. 创建孤儿分支
+    echo "1. 创建全新分支起点..."
+    git checkout --orphan fresh-start 2>/dev/null || {
+        echo "❌ 创建孤儿分支失败"
+        return 1
+    }
+    
+    # 2. 添加文件
+    echo "2. 添加当前所有文件..."
+    git add -A 2>/dev/null
+    
+    # 3. 提交
+    echo "3. 提交当前状态..."
+    git commit -m "仓库重置于 $(date '+%Y-%m-%d %H:%M:%S')" 2>/dev/null || {
+        echo "⚠️  没有文件可提交，创建空提交"
+        git commit --allow-empty -m "空仓库重置 $(date)"
+    }
+    
+    # 4. 删除原分支（智能判断）
+    echo "4. 删除原主分支..."
+    # 获取所有本地分支
+    for branch in $(git branch | sed 's/^* //' | sed 's/^  //'); do
+        if [[ "$branch" != "fresh-start" ]]; then
+            git branch -D "$branch" 2>/dev/null
+        fi
+    done
+    
+    # 5. 重命名为 main
+    echo "5. 重命名分支..."
+    git branch -M main
+    
+    # 6. 推送
+    echo ""
+    if git remote get-url origin &>/dev/null; then
+        echo "🌐 远程仓库: $(git remote get-url origin)"
+        read -p "是否强制推送到远程？(y/N): " push_confirm
         
-        if [ $push_exit_code -eq 0 ]; then
-            echo "✅ 已强制推送到远程仓库"
-        elif [ $push_exit_code -eq 124 ]; then
-            echo "⚠️  推送超时，请手动检查网络连接或认证"
-            echo "   可以使用命令手动推送: git push -f origin main"
+        if [[ "$push_confirm" =~ ^[Yy]$ ]]; then
+            echo "6. 强制推送到远程仓库..."
+            
+            # 关键修复2：不使用 timeout，直接推送
+            echo "正在推送，请稍候..."
+            if git push --force origin main --progress 2>&1; then
+                echo "✅ 已强制推送到远程仓库"
+            else
+                push_exit=$?
+                echo "⚠️  推送失败，退出码: $push_exit"
+                echo "尝试不带进度条的推送..."
+                
+                # 再次尝试简单推送
+                if git push --force origin main 2>&1; then
+                    echo "✅ 推送成功！"
+                else
+                    echo "❌ 推送失败，请手动运行:"
+                    echo "   git push --force origin main"
+                fi
+            fi
         else
-            echo "⚠️  推送失败，退出码: $push_exit_code"
-            echo "   请检查远程仓库权限或网络连接"
+            echo "⏸️  跳过远程推送"
         fi
     else
-        echo "⏸️  跳过远程推送，只重置本地仓库"
+        echo "ℹ️  未设置远程仓库"
     fi
-fi
-
-
-# 完成
-echo ""
-echo "✅ 仓库重置完成！"
-echo ""
-echo "📊 最终状态："
-echo "   分支: $(git branch --show-current)"
-echo "   提交: $(git log --oneline -1)"
-echo "   文件: $(git ls-files | wc -l) 个"
-echo "========================================"
+    
+    # 完成
+    echo ""
+    echo "✅ 仓库重置完成！"
+    echo ""
+    echo "📊 最终状态："
+    echo "   分支: $(git branch --show-current)"
+    echo "   提交: $(git log --oneline -1 2>/dev/null || echo '无')"
+    echo "   文件: $(git ls-files 2>/dev/null | wc -l) 个"
+    echo "========================================"
 }
 
-
 create_github_repo() {
-    
   # ---- 工具检查 ----
   if ! command -v git &>/dev/null; then
     echo "❌ 请先安装 git"
@@ -330,60 +298,37 @@ create_github_repo() {
     echo "❌ 克隆失败"
     return 1
   }
-
-  # ---- 3. 读额外文件夹 ----
-  read -p "请输入你的程序的路径: " import_dir
+read -p "请输入你的程序路径: " import_dir
 if [[ -n "$import_dir" ]]; then
   if [[ ! -d "$import_dir" ]]; then
     echo "❌ 目录不存在: $import_dir"
     return 1
   fi
 
-  echo "📂 正在移动文件到仓库..."
+  echo "📦 移动 .git 到程序目录..."
   
-  # 确保目标目录存在
-  mkdir -p "$target_dir"
-  
-  # 移动文件并显示进度
-  moved_count=0
-  total_files=$(find "$import_dir" -type f | wc -l)
-  
-  if [[ $total_files -eq 0 ]]; then
-    echo "📁 源目录为空"
-  else
-    echo "共发现 $total_files 个文件"
-    
-    # 逐文件移动以便跟踪进度
-    while IFS= read -r file; do
-      if cp "$file" "$target_dir/" 2>/dev/null; then
-        rm "$file"  # 移动成功后删除源文件
-        ((moved_count++))
-        echo -ne "进度: $moved_count/$total_files\r"
-      else
-        echo "❌ 无法移动: $(basename "$file")"
-      fi
-    done < <(find "$import_dir" -type f)
-    
-    echo ""  # 换行
-    
-    # 删除空目录
-    find "$import_dir" -type d -empty -delete 2>/dev/null
-    
-    echo "成功移动 $moved_count/$total_files 个文件"
-    
-    if [[ $moved_count -lt $total_files ]]; then
-      echo "⚠️  部分文件移动失败，请检查权限"
-    fi
+  # 1. 检查下载的仓库是否有 .git
+  if [[ ! -d "$target_dir/.git" ]]; then
+    echo "❌ 下载的仓库没有 .git 文件夹"
+    return 1
   fi
-fi
-
-echo ""
-echo "✅ 操作完成！"
-echo "新程序路径: $target_dir"
-if [[ -n "$import_dir" ]] && [[ ! -d "$import_dir" ]]; then
+  
+  # 2. 移动 .git 文件夹
+  mv "$target_dir/.git" "$import_dir/"
+  
+  # 3. 移动 .gitignore（如果有）
+  if [[ -f "$target_dir/.gitignore" ]]; then
+    mv "$target_dir/.gitignore" "$import_dir/"
+  fi
+  
+  # 4. 更新目标目录
+  target_dir="$import_dir"
+  
   echo ""
+  echo "✅ 完成！"
+  echo "Git 配置已移动到: $target_dir"
+  echo "现在可以直接上传了"
 fi
-
 
 }
 
