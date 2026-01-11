@@ -333,26 +333,56 @@ create_github_repo() {
 
   # ---- 3. 读额外文件夹 ----
   read -p "请输入你的程序的路径: " import_dir
-  if [[ -n "$import_dir" ]]; then
-    if [[ ! -d "$import_dir" ]]; then
-      echo "❌ 目录不存在: $import_dir"
-      return 1
-    fi
+if [[ -n "$import_dir" ]]; then
+  if [[ ! -d "$import_dir" ]]; then
+    echo "❌ 目录不存在: $import_dir"
+    return 1
+  fi
 
-    echo "📂 正在处理文件..."
-    # 用 rsync 优先，没有就用 cp -r
-    if command -v rsync &>/dev/null; then
-      rsync -a --remove-source-files "$import_dir"/ "$target_dir"/ 2>/dev/null
-    else
-      cp -r "$import_dir"/* "$target_dir"/ 2>/dev/null
+  echo "📂 正在移动文件到仓库..."
+  
+  # 确保目标目录存在
+  mkdir -p "$target_dir"
+  
+  # 移动文件并显示进度
+  moved_count=0
+  total_files=$(find "$import_dir" -type f | wc -l)
+  
+  if [[ $total_files -eq 0 ]]; then
+    echo "📁 源目录为空"
+  else
+    echo "共发现 $total_files 个文件"
+    
+    # 逐文件移动以便跟踪进度
+    while IFS= read -r file; do
+      if cp "$file" "$target_dir/" 2>/dev/null; then
+        rm "$file"  # 移动成功后删除源文件
+        ((moved_count++))
+        echo -ne "进度: $moved_count/$total_files\r"
+      else
+        echo "❌ 无法移动: $(basename "$file")"
+      fi
+    done < <(find "$import_dir" -type f)
+    
+    echo ""  # 换行
+    
+    # 删除空目录
+    find "$import_dir" -type d -empty -delete 2>/dev/null
+    
+    echo "成功移动 $moved_count/$total_files 个文件"
+    
+    if [[ $moved_count -lt $total_files ]]; then
+      echo "⚠️  部分文件移动失败，请检查权限"
     fi
   fi
-  sleep 5
-rm -rf "$import_dir"
-  # ---- 4. 输出结果 ----
+fi
+
+echo ""
+echo "✅ 操作完成！"
+echo "新程序路径: $target_dir"
+if [[ -n "$import_dir" ]] && [[ ! -d "$import_dir" ]]; then
   echo ""
-  echo "✅ 完成！"
-  echo "新程序路径:$target_dir"
+fi
 
 
 }
@@ -1088,7 +1118,10 @@ main_menu() {
         local choice
         read -n 1 -t 60 choice
         
-        
+        if [[ $? -ne 0 ]]; then
+            echo -e "\n${Y}⏰ 超时未操作，自动退出${N}"
+            exit 0
+        fi
         
         echo ""
         
